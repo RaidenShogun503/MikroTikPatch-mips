@@ -161,44 +161,28 @@ def mikro_eddsa_verify(data:bytes,signature:bytes,public_key:bytes):
     signature = ECPrivateKey.EDDSASignature.decode(curve,signature)
     return public_key.eddsa_verify(data,signature)
 
-def mikro_kcdsa_sign(data: bytes, private_key: bytes) -> bytes:
+def mikro_kcdsa_sign(data:bytes,private_key:bytes)->bytes:
     assert(isinstance(data, bytes))
     assert(isinstance(private_key, bytes))
-    
     curve = getcurvebyname('Curve25519')
-    # Chuyển đổi bytes thành số nguyên (little-endian)
-    scalar = Tools.bytestoint_le(private_key)
-    
-    # FIX: Kiểm tra xem scalar có hợp lệ để nghịch đảo không
-    # Khóa bí mật phải > 0 và < curve.n
-    if scalar % curve.n == 0:
-        raise ValueError(f"Khóa bí mật (scalar={scalar}) không hợp lệ hoặc bằng 0 mod n. "
-                         "Vui lòng kiểm tra lại CUSTOM_LICENSE_PRIVATE_KEY.")
-
-    private_key_obj = ECPrivateKey(scalar, curve)
-    public_key = private_key_obj.pubkey
-    
+    private_key:ECPrivateKey = ECPrivateKey(Tools.bytestoint_le(private_key), curve)
+    public_key:ECPublicKey = private_key.pubkey
     while True:
-        nonce_secret = secure_rand_int_between(1, curve.n - 1)
+        nonce_secret = random.SystemRandom().randint(1, curve.n - 1)
         nonce_point = nonce_secret * curve.G
         nonce = int(nonce_point.x) % curve.n
-        nonce_hash = mikro_sha256(Tools.inttobytes_le(nonce, 32))
-        
+        nonce_hash = mikro_sha256(Tools.inttobytes_le(nonce,32))
         data_hash = bytearray(mikro_sha256(data))
         for i in range(16):
             data_hash[8+i] ^= nonce_hash[i] 
-            
         data_hash[0] &= 0xF8
         data_hash[31] &= 0x7F
         data_hash[31] |= 0x40
-        data_hash_int = Tools.bytestoint_le(data_hash)
-        
-        # Tính toán chữ ký: s = d^-1 * (k - h) mod n
-        signature = (pow(private_key_obj.scalar, -1, curve.n) * (nonce_secret - data_hash_int)) % curve.n
-        
-        # Kiểm tra lại tính hợp lệ của chữ ký trước khi trả về
-        if int((public_key.point * signature + curve.G * data_hash_int).x) == nonce:
-            return bytes(nonce_hash[:16] + Tools.inttobytes_le(signature, 32))
+        data_hash = Tools.bytestoint_le(data_hash)
+        signature = pow(private_key.scalar, -1, curve.n) * (nonce_secret - data_hash)
+        signature %= curve.n
+        if int((public_key.point * signature + curve.G * data_hash).x) == nonce:
+                return bytes(nonce_hash[:16]+Tools.inttobytes_le(signature,32))
 
 def mikro_kcdsa_verify(data:bytes, signature:bytes, public_key:bytes)->bool:
     assert(isinstance(data, bytes))
